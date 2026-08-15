@@ -2,6 +2,8 @@
 
 Browser viewer for DeepSeek Harness `session.jsonl` traces. Drop a file or choose one locally; nothing is uploaded.
 
+Live demo: https://dsh-trace.lizhixin.top/
+
 ## Development
 
 ```bash
