@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getSessionStats, parseDshJsonl } from './dsh'
+import { eventAssistantStream, eventFirstTokenTime, getSessionStats, parseDshJsonl } from './dsh'
 
 const header = JSON.stringify({
   type: 'session', version: 0, id: 'session-1', createdAt: 1_700_000_000_000, delegationDepth: 0,
@@ -32,6 +32,15 @@ describe('parseDshJsonl', () => {
     expect(result.events.map(event => (event.data as { chunk: { text: string } }).chunk.text).join('')).toBe('DeepSeek!')
   })
 
+  it('decodes v2+ source event ranges', () => {
+    const source = [
+      header,
+      ...Array.from({ length: 5 }, (_, seq) => JSON.stringify({ type: 'turn/start', seq, time: 100 + seq, data: { turn: seq + 1 } })),
+      JSON.stringify({ type: 'user/message', seq: 5, time: 110, data: { content: [] }, sourceEventSeqs: [[0, 2], 4], surfaceOp: { op: 'replace', startSeq: 0, endSeq: 4 } }),
+    ].join('\n')
+    expect(parseDshJsonl(source).events[5]?.sourceEventSeqs).toEqual([0, 1, 2, 4])
+  })
+
   it('derives stats from tool and assistant events', () => {
     const source = [
       header,
@@ -42,6 +51,21 @@ describe('parseDshJsonl', () => {
     expect(getSessionStats(parseDshJsonl(source))).toMatchObject({
       turns: 1, steps: 1, toolCalls: 1, inputTokens: 12, outputTokens: 8,
     })
+  })
+
+  it('expands v2+ embedded assistant streams with the published DSH codec', () => {
+    const event = {
+      type: 'assistant/message', seq: 3, time: 150,
+      data: {
+        turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
+        stream: [
+          { type: 'chunk', time: 120, chunk: { type: 'block-start', index: 0, blockType: 'text' } },
+          { type: 'text-chunks', time0: 125, index: 0, dt: [4], texts: ['', 'hi'] },
+        ],
+      }, surfaceOp: 'append',
+    }
+    expect(eventAssistantStream(event).map(member => member.time)).toEqual([120, 125, 129])
+    expect(eventFirstTokenTime(event)).toBe(129)
   })
 
   it('includes the source line in malformed input errors', () => {

@@ -23,4 +23,6 @@ npm run preview
 - Build command: `npm run build`
 - Output directory: `dist`
 
-The viewer uses `@deepseek-ai/dsh-session` and follows DSH Web's Chat and Trajectory renderer structure. It is a static client-only app with no backend or bindings.
+The viewer reads released DSH session formats through v3. It understands embedded assistant streams, system-prompt and request-header updates, correlated retries and commands, compaction, structured context, turn usage/timing, and PTC sub-calls.
+
+It reuses `@deepseek-ai/dsh-session`, `@deepseek-ai/dsh-llm`, the published UI primitives and the UI Conversation prompt contracts. Timeline virtualization uses `@tanstack/react-virtual`, and prompt diffs use `diff`. Chat and Trajectory projections stay local so the app remains a static client-only viewer with no Cordis runtime or backend bindings.

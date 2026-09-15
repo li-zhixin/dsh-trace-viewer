@@ -1,11 +1,20 @@
-import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session/types'
+import {
+  assistantStreamFirstTokenTime,
+  expandAssistantStream,
+  type AssistantStreamRecord,
+  type TimedStreamChunk,
+} from '@deepseek-ai/dsh-llm/assistant-stream'
 
 export type JsonRecord = Record<string, unknown>
 
-export type DshHeader = Pick<SessionHeader, 'version' | 'id' | 'createdAt'> & {
+export type DshHeader = {
   type: 'session'
+  version: number
+  id: string
+  createdAt: number
   cwd?: string
   parentSession?: string
+  isSeeded?: boolean
   seedLength?: number
   origin?: 'subagent'
   delegationDepth?: number
@@ -13,7 +22,7 @@ export type DshHeader = Pick<SessionHeader, 'version' | 'id' | 'createdAt'> & {
   [key: string]: unknown
 }
 
-export type DshEvent = SessionEvent & {
+export type DshEvent = {
   type: string
   seq: number
   time: number
@@ -84,7 +93,37 @@ function parseEvent(value: unknown): DshEvent {
   assertSafeInteger(value.seq, 'event seq', 0)
   assertSafeInteger(value.time, 'event time')
   if (!Object.hasOwn(value, 'data')) throw new Error('event data is missing')
-  return value as DshEvent
+  if (value.sourceEventSeqs === undefined) return value as DshEvent
+  return { ...value, sourceEventSeqs: decodeSeqRanges(value.sourceEventSeqs, value.seq) } as DshEvent
+}
+
+function decodeSeqRanges(value: unknown, eventSeq: number): number[] {
+  if (!Array.isArray(value)) throw new Error('sourceEventSeqs must be an array')
+  const output: number[] = []
+  let hasRange = false
+  for (const entry of value) {
+    if (!Array.isArray(entry)) {
+      assertSafeInteger(entry, 'sourceEventSeqs member', 0)
+      output.push(entry)
+      continue
+    }
+    if (entry.length !== 2) throw new Error('sourceEventSeqs range must be a [start, end] pair')
+    const [start, end] = entry
+    assertSafeInteger(start, 'sourceEventSeqs range start', 0)
+    assertSafeInteger(end, 'sourceEventSeqs range end', 0)
+    if (start > end || end >= eventSeq) throw new Error('sourceEventSeqs range exceeds its event seq')
+    for (let current = start; current <= end; current += 1) output.push(current)
+    hasRange = true
+  }
+  const seen = new Set<number>()
+  for (const source of output) {
+    if (source >= eventSeq || seen.has(source)) throw new Error('sourceEventSeqs must contain unique earlier seqs')
+    seen.add(source)
+  }
+  if (hasRange && output.some((source, index) => index > 0 && source <= (output[index - 1] as number))) {
+    throw new Error('sourceEventSeqs ranges must be strictly increasing')
+  }
+  return output
 }
 
 function stringArray(value: unknown, label: string): string[] {
@@ -251,4 +290,29 @@ export function sessionTitle(session: ParsedSession): string | undefined {
 
 export function asRecord(value: unknown): JsonRecord | undefined {
   return isRecord(value) ? value : undefined
+}
+
+/** Expand the compact stream embedded by DSH v2+ without duplicating its wire codec. */
+export function eventAssistantStream(event: DshEvent): readonly TimedStreamChunk[] {
+  if (event.type !== 'assistant/message' && event.type !== 'assistant/attempt') return []
+  const data = isRecord(event.data) ? event.data : undefined
+  if (!Array.isArray(data?.stream)) return []
+  try {
+    return expandAssistantStream(data.stream as AssistantStreamRecord[])
+  } catch {
+    // The raw event remains inspectable when a future or damaged stream cannot be expanded.
+    return []
+  }
+}
+
+/** Read first-token timing from the compact stream using DSH's canonical definition. */
+export function eventFirstTokenTime(event: DshEvent): number | undefined {
+  if (event.type !== 'assistant/message' && event.type !== 'assistant/attempt') return undefined
+  const data = isRecord(event.data) ? event.data : undefined
+  if (!Array.isArray(data?.stream)) return undefined
+  try {
+    return assistantStreamFirstTokenTime(data.stream as AssistantStreamRecord[])
+  } catch {
+    return undefined
+  }
 }

@@ -12,6 +12,24 @@ export function formatTime(value: number): string {
   }).format(value)
 }
 
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+/** Match DSH Chat's compact, date-aware local message clock. */
+export function formatMessageClock(time: number, now: number = Date.now()): string {
+  const date = new Date(time)
+  const reference = new Date(now)
+  const clock = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+  if (date.getFullYear() === reference.getFullYear()
+    && date.getMonth() === reference.getMonth()
+    && date.getDate() === reference.getDate()) return clock
+  const monthDay = `${date.getMonth() + 1}/${date.getDate()}`
+  return date.getFullYear() === reference.getFullYear()
+    ? `${monthDay} ${clock}`
+    : `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()} ${clock}`
+}
+
 export function formatDuration(milliseconds: number): string {
   if (milliseconds < 1_000) return `${milliseconds} ms`
   if (milliseconds < 60_000) return `${(milliseconds / 1_000).toFixed(milliseconds < 10_000 ? 1 : 0)} s`
